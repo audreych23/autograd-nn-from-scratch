@@ -1,5 +1,7 @@
 import numpy as np
 
+# https://www.youtube.com/watch?v=dB-u77Y5a6A&t=1604s
+
 # Set seed to fixed size so no randomness
 # ======================================= Builds Computation Graph ================================================================
 class Variable:
@@ -68,7 +70,7 @@ class Variable:
             print(np.shape(upstream.grad))
             print('\n')
 
-            other.grad += unbroadcast(upstream.grad, other.grad.shape)
+            other.grad += unbroadcast(upstream.grad, other.data.shape)
 
         upstream._backward = _backward
         return upstream
@@ -93,8 +95,8 @@ class Variable:
             grad_self =  local_grad_self * upstream.grad
             grad_other = local_grad_other * upstream.grad
 
-            self.grad += unbroadcast(grad_self, self.grad.shape)
-            other.grad += unbroadcast(grad_other, other.grad.shape)
+            self.grad += unbroadcast(grad_self, self.data.shape)
+            other.grad += unbroadcast(grad_other, other.data.shape)
             # self.grad += grad_self
             # other.grad += grad_other
 
@@ -216,15 +218,17 @@ def softmax(x, dim=-1):
     exp_x = np.exp(shifted_x)
     softmax_output = exp_x / np.sum(exp_x, axis=dim, keepdims=True)
     
-    out = Variable(softmax_output, (x,), 'softmax')
+    upstream = Variable(softmax_output, (x,), 'softmax')
     # print(out)
     
     # If we combine softmax + CCE loss the backward is very simple and it becomes (probabilities - targets) / batch_size
     def _backward():
-        pass
+        # Trust in the process that softmax will also only get gradient from CCE 
+        # if not then it probably breaks TODO: USe other methods 
+        x.grad += upstream.grad
     
-    out._backward = _backward
-    return out
+    upstream._backward = _backward
+    return upstream
 
 class Softmax(Layer):
     def __init__(self, dim=1):
@@ -293,7 +297,8 @@ class CategoricalCrossEntropyLoss:
             # Gradient of cross entropy with respect to softmax output
             # is (probabilities - targets) / batch_size
             gradient = (probs.data - targets_one_hot) / batch_size
-            probs.grad += gradient
+            probs.grad += unbroadcast(gradient, probs.data.shape)
+
             print("Bakward cross entropy")
             print(probs.grad)
             print('\n')
@@ -345,15 +350,18 @@ class MLP:
         x = self.linear1(x)
         x = self.relu(x)
         x = self.linear2(x)
-        # x = self.softmax(x)
+        x = self.softmax(x)
         return x
 
     def parameters(self):
+        print("parameters")
+        print(self.linear1.parameters())
+        print(self.linear2.parameters()) 
         return self.linear1.parameters() + self.linear2.parameters()
 
 # ======================================= Utility Function ================================================================
 def one_hot(labels, num_classes):
-    return np.eye(num_classes)[labels]
+    return np.eye(num_classes)[labels.squeeze()]
 
 def unbroadcast(grad, target_shape):
     """Sum grad to match the shape of target (reverse broadcasting)."""
@@ -369,12 +377,16 @@ def unbroadcast(grad, target_shape):
 def test_autograph():
     # Dummy input and labels
     x = Variable([[1.0, 2.0], [1.5, 3.0], [2.0, 3.0]])  # shape: [2, 2]
-    y_true_np = Variable(np.array([[1], [1], [0]]))  # shape: [2, 1]
+    y_true_np = Variable(one_hot(np.array([[1], [1], [0]]), 2))  # shape: [2, 1]
+    # y_true_np = Variable(np.array([[1], [1], [0]]))
+
+    print(y_true_np.data.shape)
+
 
     # Model & loss
     model = MLP(2, 1)
-    # criterion = CategoricalCrossEntropyLoss()
-    criterion = MSELoss()
+    criterion = CategoricalCrossEntropyLoss()
+    # criterion = MSELoss()
 
     # Forward pass
     y_pred = model(x)
@@ -387,7 +399,9 @@ def test_autograph():
 
     # Print gradients
     for i, param in enumerate(model.parameters()):
-        print(f"Grad {i} shape: {param.grad.shape}\n{param.grad}")
+        print(f"Grad {i} shape: {param.grad.shape}\n{param.grad}\n {param._op}")
+
+    criterion.zero_grad()
 
 
 if __name__ == "__main__":
