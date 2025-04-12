@@ -1,5 +1,6 @@
 import numpy as np
 
+# Set seed to fixed size so no randomness
 # ======================================= Builds Computation Graph ================================================================
 class Variable:
     """
@@ -94,6 +95,8 @@ class Variable:
 
             self.grad += unbroadcast(grad_self, self.grad.shape)
             other.grad += unbroadcast(grad_other, other.grad.shape)
+            # self.grad += grad_self
+            # other.grad += grad_other
 
         upstream._backward = _backward
         return upstream
@@ -256,47 +259,47 @@ class MSELoss:
     def __call__(self, y_pred, y_true):
         return ((y_pred - y_true) ** 2).sum()
     
-# class CategoricalCrossEntropyLoss:
-#     def __init__(self, apply_softmax=True, dim=-1, eps=1e-12):
-#         self.dim = dim
-#         self.eps = eps  # Small epsilon to avoid log(0)
+class CategoricalCrossEntropyLoss:
+    def __init__(self, apply_softmax=True, dim=-1, eps=1e-12):
+        self.dim = dim
+        self.eps = eps  # Small epsilon to avoid log(0)
     
-#     def __call__(self, probs, targets):
-#         batch_size = probs.data.shape[0]
+    def __call__(self, probs, targets):
+        batch_size = probs.data.shape[0]
         
-#         # Clip probabilities to avoid numerical issues
-#         probs_clipped = np.clip(probs.data, self.eps, 1.0 - self.eps)
+        # Clip probabilities to avoid numerical issues
+        probs_clipped = np.clip(probs.data, self.eps, 1.0 - self.eps)
         
-#         # Check if targets are class indices or one-hot encoded
-#         if len(targets.data.shape) == 1 or targets.data.shape[1] == 1:
-#             # Targets are class indices, convert to one-hot
-#             num_classes = probs.data.shape[1]
-#             one_hot = np.zeros((batch_size, num_classes))
-#             for i, idx in enumerate(targets.data.flatten().astype(int)):
-#                 one_hot[i, idx] = 1
-#             targets_one_hot = one_hot
-#         else:
-#             # Targets are already one-hot encoded
-#             targets_one_hot = targets.data
+        # Check if targets are class indices or one-hot encoded
+        if len(targets.data.shape) == 1 or targets.data.shape[1] == 1:
+            # Targets are class indices, convert to one-hot
+            num_classes = probs.data.shape[1]
+            one_hot = np.zeros((batch_size, num_classes))
+            for i, idx in enumerate(targets.data.flatten().astype(int)):
+                one_hot[i, idx] = 1
+            targets_one_hot = one_hot
+        else:
+            # Targets are already one-hot encoded
+            targets_one_hot = targets.data
         
-#         # Compute cross entropy loss
-#         log_probs = np.log(probs_clipped)
-#         loss = -np.sum(targets_one_hot * log_probs) / batch_size
+        # Compute cross entropy loss
+        log_probs = np.log(probs_clipped)
+        loss = -np.sum(targets_one_hot * log_probs) / batch_size
         
-#         # Create output variable
-#         out = Variable(loss, (probs,), 'cross_entropy')
+        # Create output variable
+        out = Variable(loss, (probs,), 'cross_entropy')
         
-#         def _backward():
-#             # Gradient of cross entropy with respect to softmax output
-#             # is (probabilities - targets) / batch_size
-#             gradient = (probs.data - targets_one_hot) / batch_size
-#             probs.grad += gradient
-#             print("Bakward cross entropy")
-#             print(probs.grad)
-#             print('\n')
+        def _backward():
+            # Gradient of cross entropy with respect to softmax output
+            # is (probabilities - targets) / batch_size
+            gradient = (probs.data - targets_one_hot) / batch_size
+            probs.grad += gradient
+            print("Bakward cross entropy")
+            print(probs.grad)
+            print('\n')
         
-#         out._backward = _backward
-#         return out
+        out._backward = _backward
+        return out
     
 
 # ======================================= Optimizer SGD ================================================================
@@ -348,7 +351,6 @@ class MLP:
     def parameters(self):
         return self.linear1.parameters() + self.linear2.parameters()
 
-
 # ======================================= Utility Function ================================================================
 def one_hot(labels, num_classes):
     return np.eye(num_classes)[labels]
@@ -366,8 +368,8 @@ def unbroadcast(grad, target_shape):
 
 def test_autograph():
     # Dummy input and labels
-    x = Variable([[1.0, 2.0]])  # shape: [1, 2]
-    y_true_np = Variable(np.array([1]))  # shape: [1, 1]
+    x = Variable([[1.0, 2.0], [1.5, 3.0], [2.0, 3.0]])  # shape: [2, 2]
+    y_true_np = Variable(np.array([[1], [1], [0]]))  # shape: [2, 1]
 
     # Model & loss
     model = MLP(2, 1)
