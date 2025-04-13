@@ -337,7 +337,7 @@ class MLP:
 # ======================================= Utility Function ================================================================
 def one_hot(labels, num_classes):
     labels = np.asarray(labels).reshape(-1).astype(int)  # (N,)
-    return np.eye(num_classes)[labels]        # (N, C)
+    return np.eye(num_classes)[labels] # (N, C)
 
 def unbroadcast(grad, target_shape):
     """Sum grad to match the shape of target (reverse broadcasting)."""
@@ -349,103 +349,6 @@ def unbroadcast(grad, target_shape):
             grad = grad.sum(axis=i, keepdims=True)
 
     return grad
-
-# test if the dimensions make sense
-def test_autograph():
-    # Dummy input and labels
-    x = Variable([[1.0, 2.0], [1.5, 3.0], [2.0, 3.0]])  # shape: [2, 2]
-    y_true_np = Variable(one_hot(np.array([[1], [1], [0]]), 2))  # shape: [2, 1]
-    # y_true_np = Variable(np.array([[1], [1], [0]]))
-
-
-    # Model & loss
-    model = MLP(2, 2)
-    criterion = CategoricalCrossEntropyLoss()
-    # criterion = MSELoss()
-
-    # Forward pass
-    y_pred = model(x)
-    loss = criterion(y_pred, y_true_np)
-
-    print("Loss:", loss.data)
-
-    # Backward pass
-    loss.backward()
-
-    # Print gradients
-    for i, param in enumerate(model.parameters()):
-        print(f"Grad {i} shape: {param.grad.shape}\n{param.grad}\n {param._op}")
-
-    criterion.zero_grad()
-
-def run_test():
-    # Dummy input and labels
-    x = Variable([[1.0, 2.0], [1.5, 3.0], [1.0, 6.0]])  # shape: [2, 2]
-    y_true_np = Variable(one_hot(np.array([[1], [1], [0]]), 2))  # shape: [2, 1]
-    # y_true_np = Variable(np.array([[1], [1], [0]]))
-
-    x_test = Variable([[1.0, 2.0], [1.5, 3.0]])
-    y_test = Variable(np.array([[1], [1]]))
-    model = MLP(2, 2)
-    criterion = CategoricalCrossEntropyLoss()
-    optimizer = SGD(model.parameters(), lr = 0.01)
-
-    EPOCHS = 300
-
-    # Train model
-    for epoch in range(EPOCHS):
-        # for batch_X, batch_y in loader:
-        optimizer.zero_grad()
-        y_pred = model(x)
-        print(y_pred)
-        loss = criterion(y_pred, y_true_np)
-
-        loss.backward()
-        optimizer.step()
-
-        print(f"Epoch {epoch+1}, Loss: {loss.data}")
-
-    # Evaluate the model 
-    outputs = model(x_test)
-    print(model.parameters())
-    print("out", outputs)
-    predicted = np.argmax(outputs.data, axis=1)
-    print(predicted.shape)
-    corrected = 0
-    print(predicted)
-    print(y_test.data.reshape(-1))
-    corrected = (predicted == y_test.data.reshape(-1)).sum()
-    print(corrected)
-
-
-# =============================================== Data Loader ================================================
-class DataLoader:
-    def __init__(self, x, y, batch_size=32, shuffle=True):
-        self.x = x
-        self.y = y
-        self.batch_size = batch_size
-        self.shuffle = shuffle
-        self.indices = np.arange(len(x))
-        self.reset()
-
-    def reset(self):
-        if self.shuffle:
-            np.random.shuffle(self.indices)
-        self.current_idx = 0
-
-    def __iter__(self):
-        self.reset()
-        return self
-
-    def __next__(self):
-        if self.current_idx >= len(self.x):
-            raise StopIteration
-
-        idx = self.indices[self.current_idx: self.current_idx + self.batch_size]
-        x_batch = self.x[idx]
-        y_batch = self.y[idx]
-        self.current_idx += self.batch_size
-        return Variable(x_batch), Variable(y_batch)
 
 def load_images_from_dir_labels(dir, size=(32, 32)):
     X = []
@@ -481,6 +384,37 @@ def evaluate_accuracy(test_data_loader):
     
     accuracy = num_correct / num_total
     return accuracy
+
+
+# =============================================== Data Loader ================================================
+class DataLoader:
+    def __init__(self, x, y, batch_size=32, shuffle=True):
+        self.x = x
+        self.y = y
+        self.batch_size = batch_size
+        self.shuffle = shuffle
+        self.indices = np.arange(len(x))
+        self.reset()
+
+    def reset(self):
+        if self.shuffle:
+            np.random.shuffle(self.indices)
+        self.current_idx = 0
+
+    def __iter__(self):
+        self.reset()
+        return self
+
+    def __next__(self):
+        if self.current_idx >= len(self.x):
+            raise StopIteration
+
+        idx = self.indices[self.current_idx: self.current_idx + self.batch_size]
+        x_batch = self.x[idx]
+        y_batch = self.y[idx]
+        self.current_idx += self.batch_size
+        return Variable(x_batch), Variable(y_batch)
+
 
 if __name__ == "__main__":        
     # ======== param ===========
