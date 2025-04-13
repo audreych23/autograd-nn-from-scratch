@@ -20,3 +20,4 @@ has been done:
 - input softmax and CCE 
 - test out with MSE 
 - finish base code  
+- test out if loss reduces 

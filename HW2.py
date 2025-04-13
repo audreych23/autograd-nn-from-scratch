@@ -1,8 +1,13 @@
 import numpy as np
+from PIL import Image
+import os
+from sklearn.preprocessing import StandardScaler
+from sklearn.decomposition import PCA
 
-# https://www.youtube.com/watch?v=dB-u77Y5a6A&t=1604s
+# https://www.youtube.com/watch?v=dB-u77Y5a6A&t=1604s - Reference
+# =============== SEED ====================
+np.random.seed(42)
 
-# Set seed to fixed size so no randomness
 # ======================================= Builds Computation Graph ================================================================
 class Variable:
     """
@@ -55,20 +60,10 @@ class Variable:
         # forward pass
         other = other if isinstance(other, Variable) else Variable(other)
         upstream = Variable(self.data + other.data, (self, other), '+')
-        print("ADD")
-        print(np.shape(self.data))
-        print(np.shape(other.data))
-        print(np.shape(upstream.data))
-        print('\n')
 
         def _backward():
             self.grad += upstream.grad
             # Local gradient for addition is 1 for both inputs
-            print("ADD backward pass")
-            print(np.shape(self.grad))
-            print(np.shape(other.grad))
-            print(np.shape(upstream.grad))
-            print('\n')
 
             other.grad += unbroadcast(upstream.grad, other.data.shape)
 
@@ -84,9 +79,6 @@ class Variable:
     def __mul__(self, other):
         other = other if isinstance(other, Variable) else Variable(other)
         upstream = Variable(self.data * other.data, (self, other), '*')
-        print("Multiply")
-        print(self.data)
-        print(other.data)
 
         def _backward():
             # local gradient is the other value (the opposite va;ue) 
@@ -122,10 +114,6 @@ class Variable:
             # The gradients for matrix multiplication needs a little trick  
             # [https://www.youtube.com/watch?v=dB-u77Y5a6A&t=1604s]
             # x : [N x D] w : [D x M] y : [N x M]
-            print("matmul backward")
-            print(self.grad)
-            print(other.grad)
-            print('\n')
             self.grad += upstream.grad @ other.data.T # N X D = [N X M] [M x D]
             other.grad += self.data.T @ upstream.grad # D x M = [D x N] [N x M]
 
@@ -146,9 +134,6 @@ class Variable:
         upstream = Variable(np.sum(self.data, axis=dim), (self,), 'sum')
         
         def _backward():
-            print("SUm backward")
-            print(self.grad)
-            print(upstream.grad)
             # Create gradient with proper shape for broadcasting
             grad = np.ones_like(self.data) * upstream.grad
             if dim is not None:
@@ -196,9 +181,6 @@ class ReLU(Layer):
         upstream = Variable(np.maximum(0, x.data), (x,), 'ReLU')
 
         def _backward():
-            print('RELU backward')
-            print(upstream)
-            print('\n')
             x.grad += (x.data > 0) * upstream.grad
 
         upstream._backward = _backward
@@ -299,10 +281,6 @@ class CategoricalCrossEntropyLoss:
             gradient = (probs.data - targets_one_hot) / batch_size
             probs.grad += unbroadcast(gradient, probs.data.shape)
 
-            print("Bakward cross entropy")
-            print(probs.grad)
-            print('\n')
-        
         out._backward = _backward
         return out
     
@@ -354,14 +332,12 @@ class MLP:
         return x
 
     def parameters(self):
-        print("parameters")
-        print(self.linear1.parameters())
-        print(self.linear2.parameters()) 
         return self.linear1.parameters() + self.linear2.parameters()
 
 # ======================================= Utility Function ================================================================
 def one_hot(labels, num_classes):
-    return np.eye(num_classes)[labels.squeeze()]
+    labels = np.asarray(labels).reshape(-1).astype(int)  # (N,)
+    return np.eye(num_classes)[labels]        # (N, C)
 
 def unbroadcast(grad, target_shape):
     """Sum grad to match the shape of target (reverse broadcasting)."""
@@ -374,17 +350,16 @@ def unbroadcast(grad, target_shape):
 
     return grad
 
+# test if the dimensions make sense
 def test_autograph():
     # Dummy input and labels
     x = Variable([[1.0, 2.0], [1.5, 3.0], [2.0, 3.0]])  # shape: [2, 2]
     y_true_np = Variable(one_hot(np.array([[1], [1], [0]]), 2))  # shape: [2, 1]
     # y_true_np = Variable(np.array([[1], [1], [0]]))
 
-    print(y_true_np.data.shape)
-
 
     # Model & loss
-    model = MLP(2, 1)
+    model = MLP(2, 2)
     criterion = CategoricalCrossEntropyLoss()
     # criterion = MSELoss()
 
@@ -403,6 +378,155 @@ def test_autograph():
 
     criterion.zero_grad()
 
+def run_test():
+    # Dummy input and labels
+    x = Variable([[1.0, 2.0], [1.5, 3.0], [1.0, 6.0]])  # shape: [2, 2]
+    y_true_np = Variable(one_hot(np.array([[1], [1], [0]]), 2))  # shape: [2, 1]
+    # y_true_np = Variable(np.array([[1], [1], [0]]))
 
-if __name__ == "__main__":
-    test_autograph()
+    x_test = Variable([[1.0, 2.0], [1.5, 3.0]])
+    y_test = Variable(np.array([[1], [1]]))
+    model = MLP(2, 2)
+    criterion = CategoricalCrossEntropyLoss()
+    optimizer = SGD(model.parameters(), lr = 0.01)
+
+    EPOCHS = 300
+
+    # Train model
+    for epoch in range(EPOCHS):
+        # for batch_X, batch_y in loader:
+        optimizer.zero_grad()
+        y_pred = model(x)
+        print(y_pred)
+        loss = criterion(y_pred, y_true_np)
+
+        loss.backward()
+        optimizer.step()
+
+        print(f"Epoch {epoch+1}, Loss: {loss.data}")
+
+    # Evaluate the model 
+    outputs = model(x_test)
+    print(model.parameters())
+    print("out", outputs)
+    predicted = np.argmax(outputs.data, axis=1)
+    print(predicted.shape)
+    corrected = 0
+    print(predicted)
+    print(y_test.data.reshape(-1))
+    corrected = (predicted == y_test.data.reshape(-1)).sum()
+    print(corrected)
+
+
+# =============================================== Data Loader ================================================
+class DataLoader:
+    def __init__(self, x, y, batch_size=32, shuffle=True):
+        self.x = x
+        self.y = y
+        self.batch_size = batch_size
+        self.shuffle = shuffle
+        self.indices = np.arange(len(x))
+        self.reset()
+
+    def reset(self):
+        if self.shuffle:
+            np.random.shuffle(self.indices)
+        self.current_idx = 0
+
+    def __iter__(self):
+        self.reset()
+        return self
+
+    def __next__(self):
+        if self.current_idx >= len(self.x):
+            raise StopIteration
+
+        idx = self.indices[self.current_idx: self.current_idx + self.batch_size]
+        x_batch = self.x[idx]
+        y_batch = self.y[idx]
+        self.current_idx += self.batch_size
+        return Variable(x_batch), Variable(y_batch)
+
+def load_images_from_dir_labels(dir, size=(32, 32)):
+    X = []
+    y = []
+    class_names = sorted(os.listdir(dir))
+    class_to_idx = {name: idx for idx, name in enumerate(class_names)}
+
+    for class_name in class_names:
+        class_folder = os.path.join(dir, class_name)
+        if not os.path.isdir(class_folder):
+            continue
+        for fname in os.listdir(class_folder):
+            if fname.endswith(('.png')):
+                path = os.path.join(class_folder, fname)
+                # it's actually already 32 x 32, but just in case, we're gonna resize it again here, just in case if test data 
+                img = Image.open(path).resize(size)
+                img_array = np.array(img, dtype=np.float32).flatten() / 255.0
+                X.append(img_array)
+                y.append(class_to_idx[class_name])
+
+    return np.stack(X), np.array(y), class_to_idx
+
+def evaluate_accuracy(test_data_loader):
+    num_correct = 0
+    num_total = 0
+
+    for x_batch_test, y_batch_test in test_data_loader:
+        y_pred = model(x_batch_test)
+        y_pred = np.argmax(y_pred.data, axis=1)
+        correct = (y_pred == y_batch_test.data.reshape(-1)).sum()
+        num_correct += correct
+        num_total += y_batch_test.data.shape[0]
+    
+    accuracy = num_correct / num_total
+    return accuracy
+
+if __name__ == "__main__":        
+    # ======== param ===========
+    BATCH_SIZE = 32
+    EPOCHS = 100
+    NUM_CLASSES = 3
+
+    # ======== Setup train and test data ===========================
+    # train data 
+    X_train, y_train, dict_class_idx = load_images_from_dir_labels("Data_train")
+    # do pca here for X_train (REQUIRED) (The data has been scaled to range 0, 1, but before using pca we can make it 0 mean and unit variance)
+    scaler = StandardScaler()
+    X_scaled_train = scaler.fit_transform(X_train)
+    pca = PCA(n_components = 2)
+    X_pca_train = pca.fit_transform(X_scaled_train)
+    y_train = y_train.reshape(-1, 1)
+
+    # test data
+    X_test, y_test, dict_class_idx = load_images_from_dir_labels("Data_test")
+    # do pca here for X_test (REQUIRED)
+    X_scaled_test = scaler.transform(X_test)
+    X_pca_test = pca.transform(X_scaled_test)
+    y_test = y_test.reshape(-1, 1)
+
+    train_data_loader = DataLoader(X_pca_train, y_train)
+    test_data_loader = DataLoader(X_pca_test, y_test, batch_size=BATCH_SIZE, shuffle=False)
+
+    # ======== model, optimizer, criterion ============================
+    # There will be 2 features after doing PCA     
+    model = MLP(2, 3)
+    criterion = CategoricalCrossEntropyLoss()
+    optimizer = SGD(model.parameters(), lr = 0.01)
+    # ==================== train ======================================
+    for epoch in range(EPOCHS):
+        for x_batch, y_batch in train_data_loader:
+            optimizer.zero_grad()
+            y_train_one_hot = one_hot(y_batch.data, NUM_CLASSES)
+            
+            y_pred = model(x_batch)
+            loss = criterion(y_pred, y_train_one_hot)
+
+            loss.backward()
+            optimizer.step()
+
+        print(f"Epoch {epoch+1}, Loss: {loss.data}")
+
+    # =================== evaluate ====================================
+    test_accuracy = evaluate_accuracy(test_data_loader)
+    print("test_accuracy:", test_accuracy)
