@@ -3,6 +3,7 @@ from PIL import Image
 import os
 from sklearn.preprocessing import StandardScaler
 from sklearn.decomposition import PCA
+import argparse
 
 # https://www.youtube.com/watch?v=dB-u77Y5a6A&t=1604s - Reference
 # =============== SEED ====================
@@ -416,15 +417,46 @@ class DataLoader:
         return Variable(x_batch), Variable(y_batch)
 
 
-if __name__ == "__main__":        
+if __name__ == "__main__": 
+
     # ======== param ===========
-    BATCH_SIZE = 32
-    EPOCHS = 100
-    NUM_CLASSES = 3
+    parser = argparse.ArgumentParser(description="Training and testing configuration")
+
+    parser.add_argument('--num_classes', type=int, default=3, 
+                    help='Number of Classes (default: 3)')
+    parser.add_argument('--batch_size', type=int, default=32, 
+                    help='Batch size for training and testing (default: 32)')
+    parser.add_argument('--epochs', type=int, default=100, 
+                    help='Number of training epochs (default: 100)')
+    parser.add_argument('--learning_rate', type=float, default=0.01, 
+                    help='Learning rate for optimizer (default: 100)')
+    parser.add_argument('--optimizer', type=str, default='sgd', choices=['sgd', 'adam'],
+                    help='Choose the optimizer: sgd, or adam (default: sgd)')
+    parser.add_argument('--momentum', type=float, default=0.0, 
+                    help='momentum for SGD optimizer (default: 0.0)')
+    parser.add_argument('--train', type=str, default='Data_train', 
+                    help='Specify folder of train data (default: Data_train)')
+    parser.add_argument('--test', type=str, default='Data_test', 
+                    help='Specify folder of test data (default: Data_test)')
+    parser.add_argument('--weight_decay', type=float, default=0.0, 
+                    help='Specify Regularization/ weight decay term (default: 0.0)')
+
+    args = parser.parse_args()
+
+    # Accessing the arguments
+    NUM_CLASSES = args.num_classes
+    BATCH_SIZE = args.batch_size
+    EPOCHS = args.epochs
+    LEARNING_RATE = args.learning_rate
+    OPTIMIZER_NAME = args.name
+    MOMENTUM_RATE = args.momentum
+    DATA_TRAIN_DIR = args.train
+    DATA_TEST_DIR = args.test
+    WEIGHT_DECAY = args.weight_decay
 
     # ======== Setup train and test data ===========================
     # train data 
-    X_train, y_train, dict_class_idx = load_images_from_dir_labels("Data_train")
+    X_train, y_train, dict_class_idx = load_images_from_dir_labels(DATA_TRAIN_DIR)
     # do pca here for X_train (REQUIRED) (The data has been scaled to range 0, 1, but before using pca we can make it 0 mean and unit variance)
     scaler = StandardScaler()
     X_scaled_train = scaler.fit_transform(X_train)
@@ -433,7 +465,7 @@ if __name__ == "__main__":
     y_train = y_train.reshape(-1, 1)
 
     # test data
-    X_test, y_test, dict_class_idx = load_images_from_dir_labels("Data_test")
+    X_test, y_test, dict_class_idx = load_images_from_dir_labels(DATA_TEST_DIR)
     # do pca here for X_test (REQUIRED)
     X_scaled_test = scaler.transform(X_test)
     X_pca_test = pca.transform(X_scaled_test)
@@ -446,7 +478,13 @@ if __name__ == "__main__":
     # There will be 2 features after doing PCA     
     model = MLP(2, 3)
     criterion = CategoricalCrossEntropyLoss()
-    optimizer = SGD(model.parameters(), lr = 0.01)
+    if OPTIMIZER_NAME == 'sgd':
+        optimizer = SGD(model.parameters(), lr = LEARNING_RATE, 
+                        momentum=MOMENTUM_RATE, weight_decay=WEIGHT_DECAY)
+    else:
+        # optimizer = Adam()
+        pass
+     
     # ==================== train ======================================
     for epoch in range(EPOCHS):
         for x_batch, y_batch in train_data_loader:
