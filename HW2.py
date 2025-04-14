@@ -4,6 +4,7 @@ import os
 from sklearn.preprocessing import StandardScaler
 from sklearn.decomposition import PCA
 import argparse
+import matplotlib.pyplot as plt
 
 # https://www.youtube.com/watch?v=dB-u77Y5a6A&t=1604s - Reference
 # =============== SEED ====================
@@ -102,7 +103,7 @@ class Variable:
         
         def _backward():
             # Local gradient: power * x^(power-1)
-            self.grad += (power * self.data ** (power - 1)) * out.grad
+            self.grad += (power * self.data ** (power - 1)) * upstream.grad
         
         upstream._backward = _backward
         return upstream
@@ -253,7 +254,7 @@ class CategoricalCrossEntropyLoss:
     
     def __call__(self, probs, targets):
         batch_size = probs.data.shape[0]
-        
+
         # Clip probabilities to avoid numerical issues
         probs_clipped = np.clip(probs.data, self.eps, 1.0 - self.eps)
         
@@ -297,20 +298,46 @@ class SGD:
     
     def step(self):
         for i, param in enumerate(self.parameters):
-            # Apply weight decay (L2 regularization)
             if self.weight_decay > 0:
                 param.grad += self.weight_decay * param.data
             
-            # Update velocity with momentum
             self.velocity[i] = self.momentum * self.velocity[i] - self.lr * param.grad
             
-            # Update parameters
             param.data += self.velocity[i]
     
     def zero_grad(self):
         for param in self.parameters:
             param.zero_grad()
 
+class Adam:
+    def __init__(self, parameters, lr=0.001, betas=(0.9, 0.999), eps=1e-8, weight_decay=0.0):
+        self.parameters = parameters
+        self.lr = lr
+        self.beta1, self.beta2 = betas
+        self.eps = eps
+        self.weight_decay = weight_decay
+
+        self.m = [np.zeros_like(param.data) for param in parameters]  # First moment
+        self.v = [np.zeros_like(param.data) for param in parameters]  # Second moment
+        self.t = 0  # Time step
+
+    def step(self):
+        self.t += 1
+        for i, param in enumerate(self.parameters):
+            if self.weight_decay > 0:
+                param.grad += self.weight_decay * param.data
+
+            self.m[i] = self.beta1 * self.m[i] + (1 - self.beta1) * param.grad
+            self.v[i] = self.beta2 * self.v[i] + (1 - self.beta2) * (param.grad ** 2)
+
+            m_hat = self.m[i] / (1 - self.beta1 ** self.t)
+            v_hat = self.v[i] / (1 - self.beta2 ** self.t)
+
+            param.data -= self.lr * m_hat / (np.sqrt(v_hat) + self.eps)
+
+    def zero_grad(self):
+        for param in self.parameters:
+            param.zero_grad()
 
 # ======================================= Model Defintion: 2-layer MLP ================================================================
 class MLP:
@@ -352,7 +379,6 @@ class MLP2:
     def forward(self, x):
         x = self.linear1(x)
         x = self.relu(x)
-        x = self.linear2(x)
         x = self.relu(x)
         x = self.linear3(x)
         x = self.softmax(x)
@@ -413,6 +439,45 @@ def evaluate_accuracy(test_data_loader, model):
     return accuracy
 
 
+def plot_acc_loss_graph(y_data, x_data, file_name='accuracy_plot.png', plot_name='accuracy'):
+    plt.figure(figsize=(8, 5))
+    plt.plot(x_data, y_data, marker='o', linestyle='-', color='blue', label=plot_name)
+    plt.title(f'{plot_name.capitalize()} over Epochs')
+    plt.xlabel('Epochs')
+    plt.ylabel(plot_name.capitalize())
+    plt.grid(True)
+    plt.legend()
+    plt.tight_layout()
+    plt.savefig(file_name)
+    plt.close()
+
+def plot_decision_regions(X, y, model, plot_title='Decision Regions', file_name='decision_regions.png'):
+    h = 0.02  
+    x_min, x_max = X[:, 0].min() - 1, X[:, 0].max() + 1
+    y_min, y_max = X[:, 1].min() - 1, X[:, 1].max() + 1
+
+    xx, yy = np.meshgrid(np.arange(x_min, x_max, h),
+                         np.arange(y_min, y_max, h))
+
+    grid_points = Variable(np.c_[xx.ravel(), yy.ravel()])
+    predictions = model(grid_points)
+    predictions = np.argmax(predictions.data, axis=1)
+
+    zz = predictions.reshape(xx.shape)
+
+    plt.contourf(xx, yy, zz, alpha=0.3, cmap=plt.cm.RdYlBu)
+
+    scatter = plt.scatter(X[:, 0], X[:, 1], c=y, cmap=plt.cm.RdYlBu, edgecolor='k', s=50)
+    plt.legend(handles=scatter.legend_elements()[0], labels=['Class 0', 'Class 1', 'Class 2'])
+
+    plt.title(plot_title)
+    plt.xlabel('Feature 1')
+    plt.ylabel('Feature 2')
+    plt.tight_layout()
+
+    plt.savefig(file_name)
+    plt.close()
+
 # =============================================== Data Loader ================================================
 class DataLoader:
     def __init__(self, x, y, batch_size=32, shuffle=True):
@@ -466,6 +531,8 @@ if __name__ == "__main__":
                     help='Specify folder of test data (default: Data_test)')
     parser.add_argument('--weight_decay', type=float, default=0.0, 
                     help='Specify Regularization/ weight decay term (default: 0.0)')
+    parser.add_argument('--model', type=int, default=0, choices=[0, 1], 
+                    help='Specify which model to use: 0 - 2 layer NN, 1 - 3 layer NN (default: 0)')
 
     args = parser.parse_args()
 
@@ -479,6 +546,9 @@ if __name__ == "__main__":
     DATA_TRAIN_DIR = args.train
     DATA_TEST_DIR = args.test
     WEIGHT_DECAY = args.weight_decay
+    MODEL_NUM = args.model
+
+    
 
     # ======== Setup train and test data ===========================
     # train data 
@@ -502,30 +572,62 @@ if __name__ == "__main__":
 
     # ======== model, optimizer, criterion ============================
     # There will be 2 features after doing PCA     
-    model = MLP(2, 3)
-    model2 = MLP2(2, 3)
+    if MODEL_NUM == 0:
+        model = MLP(2, 3)
+        plot_name_loss = 'loss_NN_2_Layer_plot.png'
+        plot_name_acc = 'acc_NN_2_layer_plot.png'
+        plot_name_train_reg = 'train_decision_regions_NN_2_layer_plot.png'
+        plot_name_test_reg = 'test_decision_regions_NN_2_layer_plot.png'
+    else:
+        model = MLP2(2, 3)
+        plot_name_loss = 'loss_NN_3_Layer_plot.png'
+        plot_name_acc = 'acc_NN_3_layer_plot.png'
+        plot_name_train_reg = 'train_decision_regions_NN_3_layer_plot.png'
+        plot_name_test_reg = 'test_decision_regions_NN_3_layer_plot.png'
+
+
     criterion = CategoricalCrossEntropyLoss()
+    
     if OPTIMIZER_NAME == 'sgd':
-        optimizer = SGD(model2.parameters(), lr = LEARNING_RATE, 
+        optimizer = SGD(model.parameters(), lr = LEARNING_RATE, 
                         momentum=MOMENTUM_RATE, weight_decay=WEIGHT_DECAY)
     else:
-        # optimizer = Adam()
-        pass
-     
+        optimizer = Adam(model.parameters(), lr = LEARNING_RATE, weight_decay=WEIGHT_DECAY)
+    
+    training_loss = []
+    training_acc = []
+
     # ==================== train ======================================
     for epoch in range(EPOCHS):
+        num_correct = 0
+        num_total = 0
         for x_batch, y_batch in train_data_loader:
             optimizer.zero_grad()
             y_train_one_hot = one_hot(y_batch.data, NUM_CLASSES)
             
-            y_pred = model2(x_batch)
+            y_pred = model(x_batch)
+
+            y_pred_argmax = np.argmax(y_pred.data, axis=1)
+            correct = (y_pred_argmax == y_batch.data.reshape(-1)).sum()
+            num_correct += correct
+            num_total += y_batch.data.shape[0]
+
             loss = criterion(y_pred, y_train_one_hot)
 
             loss.backward()
             optimizer.step()
+        acc = num_correct / num_total
 
         print(f"Epoch {epoch+1}, Loss: {loss.data}")
+        training_loss.append(loss.data)
+        training_acc.append(acc)    
 
     # =================== evaluate ====================================
-    test_accuracy = evaluate_accuracy(test_data_loader, model2)
+    test_accuracy = evaluate_accuracy(test_data_loader, model)
     print("test_accuracy:", test_accuracy)
+    
+    plot_acc_loss_graph(training_loss, range(EPOCHS), plot_name_loss, 'loss')
+    plot_acc_loss_graph(training_acc, range(EPOCHS), plot_name_acc, 'acc')
+
+    plot_decision_regions(X_pca_train, y_train, model, plot_title='Training Decision Regions', file_name=plot_name_train_reg)
+    plot_decision_regions(X_pca_test, y_test, model, plot_title='Testing Decision Regions', file_name=plot_name_test_reg)
