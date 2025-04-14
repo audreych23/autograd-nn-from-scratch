@@ -7,7 +7,7 @@ import argparse
 
 # https://www.youtube.com/watch?v=dB-u77Y5a6A&t=1604s - Reference
 # =============== SEED ====================
-np.random.seed(42)
+np.random.seed(1)
 
 # ======================================= Builds Computation Graph ================================================================
 class Variable:
@@ -98,14 +98,14 @@ class Variable:
     
     def __pow__(self, power):
         assert isinstance(power, (int, float)), "Power must be a scalar"
-        out = Variable(self.data ** power, (self,), f'**{power}')
+        upstream = Variable(self.data ** power, (self,), f'**{power}')
         
         def _backward():
             # Local gradient: power * x^(power-1)
             self.grad += (power * self.data ** (power - 1)) * out.grad
         
-        out._backward = _backward
-        return out
+        upstream._backward = _backward
+        return upstream
     
     def __matmul__(self, other):
         other = other if isinstance(other, Variable) else Variable(other)
@@ -335,6 +335,32 @@ class MLP:
     def parameters(self):
         return self.linear1.parameters() + self.linear2.parameters()
 
+# ======================================= Model Defintion: 3-layer MLP ================================================================
+class MLP2:
+    # input size is the amount of inputs features, output size is the amount of class output
+    def __init__(self, input_size, output_size):
+        self.linear1 = Linear(input_size, 10)
+        self.relu = ReLU()
+        self.linear2 = Linear(10, 10)
+        self.linear3 = Linear(10, output_size)
+        self.softmax = Softmax()
+
+
+    def __call__(self, x):
+        return self.forward(x)
+
+    def forward(self, x):
+        x = self.linear1(x)
+        x = self.relu(x)
+        x = self.linear2(x)
+        x = self.relu(x)
+        x = self.linear3(x)
+        x = self.softmax(x)
+        return x
+
+    def parameters(self):
+        return self.linear1.parameters() + self.linear2.parameters()
+
 # ======================================= Utility Function ================================================================
 def one_hot(labels, num_classes):
     labels = np.asarray(labels).reshape(-1).astype(int)  # (N,)
@@ -372,7 +398,7 @@ def load_images_from_dir_labels(dir, size=(32, 32)):
 
     return np.stack(X), np.array(y), class_to_idx
 
-def evaluate_accuracy(test_data_loader):
+def evaluate_accuracy(test_data_loader, model):
     num_correct = 0
     num_total = 0
 
@@ -448,7 +474,7 @@ if __name__ == "__main__":
     BATCH_SIZE = args.batch_size
     EPOCHS = args.epochs
     LEARNING_RATE = args.learning_rate
-    OPTIMIZER_NAME = args.name
+    OPTIMIZER_NAME = args.optimizer
     MOMENTUM_RATE = args.momentum
     DATA_TRAIN_DIR = args.train
     DATA_TEST_DIR = args.test
@@ -477,9 +503,10 @@ if __name__ == "__main__":
     # ======== model, optimizer, criterion ============================
     # There will be 2 features after doing PCA     
     model = MLP(2, 3)
+    model2 = MLP2(2, 3)
     criterion = CategoricalCrossEntropyLoss()
     if OPTIMIZER_NAME == 'sgd':
-        optimizer = SGD(model.parameters(), lr = LEARNING_RATE, 
+        optimizer = SGD(model2.parameters(), lr = LEARNING_RATE, 
                         momentum=MOMENTUM_RATE, weight_decay=WEIGHT_DECAY)
     else:
         # optimizer = Adam()
@@ -491,7 +518,7 @@ if __name__ == "__main__":
             optimizer.zero_grad()
             y_train_one_hot = one_hot(y_batch.data, NUM_CLASSES)
             
-            y_pred = model(x_batch)
+            y_pred = model2(x_batch)
             loss = criterion(y_pred, y_train_one_hot)
 
             loss.backward()
@@ -500,5 +527,5 @@ if __name__ == "__main__":
         print(f"Epoch {epoch+1}, Loss: {loss.data}")
 
     # =================== evaluate ====================================
-    test_accuracy = evaluate_accuracy(test_data_loader)
+    test_accuracy = evaluate_accuracy(test_data_loader, model2)
     print("test_accuracy:", test_accuracy)
